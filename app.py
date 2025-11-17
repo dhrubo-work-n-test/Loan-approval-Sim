@@ -226,52 +226,61 @@ if "result" in st.session_state:
                        "simulation_summary.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-# ----------------------------------------------------
-# Optimization
-# ----------------------------------------------------
-st.markdown("---")
-st.header("Optimization — Find Best Configuration Under Budget")
+# ----------------------------------------------------# --------------------------
+# --- OPTIMIZATION ENGINE ---
+# --------------------------
 
-if optimize_btn:
-    st.info("Searching for optimal staff configuration...")
+st.subheader("⚙️ Resource Optimization (Experimental)")
 
-    ranges = {}
-    for s, c in staff.items():
-        ranges[s] = range(max(0, c - 2), c + 3)
+if 'last_result' in st.session_state:
+    system, df_queues, summary = st.session_state['last_result']
 
-    best = None
-    best_conf = None
-    total_candidates = np.prod([len(r) for r in ranges.values()])
-    progress = st.progress(0)
+    st.write("This tool finds the best place to add staff to reduce total waiting time.")
 
-    for i, combo in enumerate(product(*ranges.values())):
-        candidate = dict(zip(ranges.keys(), combo))
-        total_cost = sum(candidate[s] * cost_per_staff for s in candidate)
+    budget = st.number_input("Available Budget ($)", min_value=0, value=5000)
 
-        if total_cost > budget:
-            continue
+    # Example costs (you can adjust)
+    resource_costs = {
+        "Document Collection": 2000,
+        "Initial Review": 2500,
+        "Credit Check": 3000,
+        "Underwriting": 3500,
+        "Final Approval": 4000,
+    }
 
-        system, df_queues, summary = run_simulation(
-            DEFAULT_STAGES, DEFAULT_PROC, candidate, num_loans, arrival_interval, days
+    # Calculate current total waiting time
+    current_total_wait = sum(summary["stage_avg_wait_min"].values())
+
+    best_stage = None
+    best_improvement = 0
+
+    for stage, cost in resource_costs.items():
+        if cost > budget:
+            continue  # skip if too expensive
+
+        # Simple heuristic model:
+        # Adding one resource reduces waiting by approx wait / (res + 1)
+        current_wait = summary["stage_avg_wait_min"].get(stage, 0)
+        current_res = system.stages[stage].capacity
+
+        improved_wait = current_wait / (current_res + 1)  # heuristic
+        improvement = current_wait - improved_wait
+
+        if improvement > best_improvement:
+            best_improvement = improvement
+            best_stage = stage
+
+    if best_stage:
+        st.success(
+            f"💡 Best Use of Budget: **Add 1 resource to {best_stage}** "
+            f"→ Reduces total waiting by approx **{best_improvement:.2f} minutes**"
         )
-
-        metric = summary["avg_total_time_min"]
-        if best is None or metric < best:
-            best = metric
-            best_conf = (candidate, total_cost, summary)
-
-        progress.progress(int((i + 1) / total_candidates * 100))
-
-    if best_conf:
-        st.success("Optimization Complete!")
-        cand, tot_cost, summ = best_conf
-
-        st.subheader("Best Staff Allocation")
-        st.write(pd.DataFrame.from_dict(cand, orient="index", columns=["staff"]))
-        st.write(f"Total Cost/day: ₹{tot_cost}")
-        st.write(f"Expected Avg Approval Time: {summ['avg_total_time_min']:.1f} min")
     else:
-        st.error("No feasible configuration found within budget.")
+        st.warning("No feasible resource addition under this budget.")
+
+else:
+    st.info("Run a simulation first to use optimization.")
+
 
 # ----------------------------------------------------
 # Footer
